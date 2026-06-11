@@ -1,0 +1,54 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+.dark {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: #fff5f8;
+  color: #442735;
+}
+
+.dark body {
+  background: #21141b;
+  color: #fff4f8;
+}
+
+button,
+textarea {
+  font: inherit;
+}
+
+::selection {
+  background: #ffc8dc;
+  color: #6b2745;
+}
+
+.dot-grid {
+  background-image: radial-gradient(rgba(229, 111, 159, 0.2) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+.dark .dot-grid {
+  background-image: radial-gradient(rgba(255, 177, 207, 0.12) 1px, transparent 1px);
+}
+
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(229, 111, 159, 0.45) transparent;
+}
