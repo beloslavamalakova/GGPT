@@ -171,9 +171,12 @@ export async function POST(request: Request) {
       ? body.persona === "bestie" && body.replyToPersona === "delulu"
         ? `As Bestie evaluating Delulu Bestie, intervene only if Delulu's hopeful interpretation leads to a materially different conclusion or next action than your honest reading. Do not reply just to soften, qualify, endorse, or add practical advice to her optimism.`
         : body.persona === "delulu" && body.replyToPersona === "bestie"
-          ? `As Delulu Bestie evaluating Bestie, intervene only if Bestie dismisses a hopeful possibility that you genuinely believe remains plausible, or recommends an action that conflicts with your hopeful reading. Do not reply just to reassure the user after agreeing with Bestie's conclusion.`
+          ? `As Delulu Bestie evaluating Bestie, silently intervene only if Bestie's conclusion closes off a hopeful reading you genuinely want to keep open, or her suggested action conflicts with yours. Do not reply just to reassure the user after agreeing with Bestie's conclusion.`
           : `Intervene only when your conclusion or recommended action is materially incompatible with ${PERSONAS[body.replyToPersona].name}'s.`
       : "";
+    const interjectionVoice = body.type === "interjection" && body.persona === "delulu"
+      ? `Begin with "${PERSONAS[body.replyToPersona].name}," and disagree like a friend discovering her thought while texting from bed, not a lawyer presenting a conclusion. Think out loud with "my first thought is," "my delulu brain immediately goes," "I'm not saying that's true," or a quick "what if" when natural. Paint one tiny alternative scene without claiming to know anyone's emotions, motives, fears, regrets, or intentions. Never use "you are ignoring," "you are dismissing," "valid," "acknowledging," "evidence," "reasonable," or abstract argument language. Good energy: "${PERSONAS[body.replyToPersona].name}, wait, what if he just panicked?", "${PERSONAS[body.replyToPersona].name}, I'm not saying that's true, but that assumes he had a master plan," or "${PERSONAS[body.replyToPersona].name}, girl, not everything is a strategic operation." Keep it playful, curious, uncertain, and spontaneous rather than persuasive.`
+      : `Begin with the exact name "${body.type === "interjection" ? PERSONAS[body.replyToPersona].name : "the other persona"}," so it is unmistakably a direct reply. State the disagreement immediately.`;
     const stageInstructions = body.type === "persona"
       ? `\n\nINITIAL GROUP REPLY RULE: Give a complete first perspective based only on what the user shared. Do not ask the user any questions in this initial reply. Do not end with a question mark.`
       : body.type === "followup"
@@ -190,10 +193,10 @@ A clash exists only when at least one of these is true:
 2. You recommend a materially incompatible next action.
 3. Following their advice would undermine what you believe the user should do.
 
-No clash exists when you agree with their conclusion but would use a different tone, add reassurance, add a caveat, mention another possibility, or offer extra advice. Agreement plus nuance is still agreement. ${interjectionClashFocus}
+No clash exists when you agree with their conclusion but would use a different tone, add reassurance, add a caveat, suggest another explanation, or offer extra advice. Agreement plus nuance is still agreement. ${interjectionClashFocus}
 
 If there is no clear clash, output exactly NO_REPLY and nothing else. When uncertain, output NO_REPLY.
-If there is a clear clash, begin with the exact name "${PERSONAS[body.replyToPersona].name}," so it is unmistakably a direct reply. State the disagreement immediately. Do not praise, validate, support, echo, build on, or summarize the other persona's response. Do not use agreement openings such as "I agree," "exactly," "yes," "totally," "fair," or "and." Use only one or two short sentences and 15-35 words total. Do not ask a question. Use plain text only, with no Markdown or asterisks.`
+If there is a clear clash, ${interjectionVoice} Do not praise, validate, support, echo, build on, or summarize the other persona's response. Do not use agreement openings such as "I agree," "exactly," "yes," "totally," "fair," or "and." Use only one or two short sentences and 15-35 words total. Do not ask a question. Use plain text only, with no Markdown or asterisks.`
           : "";
     const instructions = body.type === "verdict"
       ? VERDICT_PROMPT
