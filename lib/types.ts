@@ -17,6 +17,8 @@ export type FollowUpMessage = {
   persona: PersonaId;
   role: "user" | "assistant";
   content: string;
+  replyToMessageId?: string;
+  replyToPersona?: PersonaId;
 };
 
 export type Conversation = {
@@ -52,4 +54,15 @@ export type FollowUpRequest = {
   attachments?: Attachment[];
 };
 
-export type RespondRequest = PersonaRequest | VerdictRequest | FollowUpRequest;
+export type InterjectionRequest = {
+  type: "interjection";
+  persona: PersonaId;
+  replyToPersona: PersonaId;
+  message: string;
+  originalQuestion: string;
+  originalAnswers: PersonaAnswer[];
+  verdict: string;
+  thread: FollowUpMessage[];
+};
+
+export type RespondRequest = PersonaRequest | VerdictRequest | FollowUpRequest | InterjectionRequest;

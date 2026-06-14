@@ -9,7 +9,7 @@ GossipGPT is a mobile-first AI friend-group chat. A user asks one question and g
 - **Gemini REST API** through a server-only route at `POST /api/respond`.
 - **Browser localStorage** for up to 30 completed conversations and the selected theme.
 - **Sequential client orchestration** so each persona appears as soon as its request completes, followed by the verdict request.
-- **Shared follow-up memory** that lets the user switch between Bestie, Therapist, and Delulu Bestie while every adviser can see the full labeled conversation.
+- **Shared follow-up memory** that lets the user switch between Bestie, Therapist, and Delulu Bestie while every adviser can see the full labeled conversation and interject when they substantively disagree.
 - **Multimodal context** from screenshots, images, PDFs, text, or Markdown files sent inline to Gemini.
 
 The API key never reaches the browser. Conversation history stays in the current browser, but submitted questions and generated persona answers are sent to Google Gemini to produce responses.
@@ -86,7 +86,7 @@ The chat calls the same backend route four times:
 3. `Delulu Bestie` with the user's question.
 4. `GGPT Verdict` with the question and all three generated answers.
 
-After the verdict, each persona bubble has an **Ask a follow-up** action. Follow-ups call only the selected persona, use one Gemini request per message, and are saved with the conversation in local storage. Every follow-up request includes the original question, all three initial answers, the verdict, and the shared labeled transcript, so switching advisers preserves context.
+After the verdict, each persona bubble has an **Ask a follow-up** action. The selected persona answers first, then the other personas may evaluate whether they substantively disagree; at most one can reply directly, with Bestie and Delulu given priority to respond to each other. Direct persona replies and follow-ups are saved with the conversation in local storage. Every request includes the original question, all three initial answers, the verdict, and the shared labeled transcript, so switching advisers preserves context.
 
 The composer accepts up to three PNG, JPEG, WebP, PDF, TXT, or Markdown files with an 8 MB combined limit. Attachments are sent to every initial persona and to focused follow-ups in the current session. File bytes are deliberately not saved in browser history, so reopening an older conversation restores its messages but not its attachments.
 

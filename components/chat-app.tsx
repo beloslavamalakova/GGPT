@@ -14,6 +14,10 @@ const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const ALLOWED_FILE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf", "text/plain", "text/markdown"]);
 type LoadingStage = PersonaId | "verdict" | null;
 
+function displayText(content: string) {
+  return content.replace(/\*\*/g, "");
+}
+
 function readFileAsAttachment(file: File): Promise<Attachment> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -37,6 +41,17 @@ async function requestResponse(body: RespondRequest) {
   return data.content;
 }
 
+async function requestInterjection(body: Extract<RespondRequest, { type: "interjection" }>) {
+  const response = await fetch("/api/respond", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = (await response.json()) as { content?: string | null; error?: string };
+  if (!response.ok) throw new Error(data.error || "No response received.");
+  return data.content || null;
+}
+
 function LoadingBubble({ personaId }: { personaId: PersonaId }) {
   const persona = PERSONAS[personaId];
   return (
@@ -52,14 +67,14 @@ function LoadingBubble({ personaId }: { personaId: PersonaId }) {
   );
 }
 
-function PersonaBubble({ answer, onFollowUp, showFollowUp = false }: { answer: PersonaAnswer; onFollowUp?: (persona: PersonaId) => void; showFollowUp?: boolean }) {
+function PersonaBubble({ answer, onFollowUp, showFollowUp = false, replyToPersona }: { answer: PersonaAnswer; onFollowUp?: (persona: PersonaId) => void; showFollowUp?: boolean; replyToPersona?: PersonaId }) {
   const persona = PERSONAS[answer.persona];
   return (
     <div className="flex animate-fade-up gap-3">
       <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-full shadow-sm ${persona.avatarClass}`}>{persona.emoji}</span>
       <div className="max-w-[calc(100%-3.25rem)] sm:max-w-[82%]">
-        <div className="mb-1.5 flex items-center gap-2"><span className="text-xs font-black">{persona.name}</span><span className="text-[11px] text-black/35 dark:text-white/35">{persona.tagline}</span></div>
-        <div className={`whitespace-pre-wrap rounded-2xl rounded-tl-md px-4 py-3.5 text-[15px] leading-6 shadow-sm ${persona.bubbleClass}`}>{answer.content}</div>
+        <div className="mb-1.5 flex items-center gap-2"><span className="text-xs font-black">{persona.name}</span><span className="text-[11px] text-black/35 dark:text-white/35">{replyToPersona ? `replying to ${PERSONAS[replyToPersona].name}` : persona.tagline}</span></div>
+        <div className={`whitespace-pre-wrap rounded-2xl rounded-tl-md px-4 py-3.5 text-[15px] leading-6 shadow-sm ${persona.bubbleClass}`}>{displayText(answer.content)}</div>
         {showFollowUp && <button type="button" onClick={() => onFollowUp?.(answer.persona)} className="mt-2 rounded-full border border-black/10 px-3 py-1.5 text-xs font-bold text-black/55 transition hover:border-grape/30 hover:text-grape dark:border-white/10 dark:text-white/55 dark:hover:text-[#bda5ff]">Ask {persona.name} a follow-up</button>}
       </div>
     </div>
@@ -71,7 +86,7 @@ function VerdictCard({ verdict, loading }: { verdict?: string; loading?: boolean
     <div className="animate-fade-up overflow-hidden rounded-3xl border border-grape/20 bg-gradient-to-br from-[#f6a9c5] via-grape to-[#c74f81] p-[1px] shadow-glow">
       <div className="rounded-[calc(1.5rem-1px)] bg-gradient-to-br from-[#eb7caa] to-[#bd4777] p-5 text-white sm:p-6">
         <div className="flex items-center gap-2"><span className="grid h-8 w-8 place-items-center rounded-xl bg-white/20 text-base">🎀</span><p className="text-xs font-black uppercase tracking-[0.18em] text-white/80">GGPT Verdict</p></div>
-        {loading ? <div className="mt-5 space-y-2.5"><div className="h-3 w-full animate-pulse rounded-full bg-white/20" /><div className="h-3 w-5/6 animate-pulse rounded-full bg-white/20" /><div className="h-3 w-2/3 animate-pulse rounded-full bg-white/20" /></div> : <div className="mt-4 whitespace-pre-wrap text-[15px] font-medium leading-7 text-white/95">{verdict}</div>}
+        {loading ? <div className="mt-5 space-y-2.5"><div className="h-3 w-full animate-pulse rounded-full bg-white/20" /><div className="h-3 w-5/6 animate-pulse rounded-full bg-white/20" /><div className="h-3 w-2/3 animate-pulse rounded-full bg-white/20" /></div> : <div className="mt-4 whitespace-pre-wrap text-[15px] font-medium leading-7 text-white/95">{displayText(verdict || "")}</div>}
       </div>
     </div>
   );
@@ -183,8 +198,8 @@ export function ChatApp() {
   function selectConversation(conversation: Conversation) {
     if (isLoading) return;
     const savedFollowUps = conversation.followUps || [];
-    const lastFollowUp = savedFollowUps.at(-1);
-    setQuestion(conversation.question); setAnswers(conversation.answers); setVerdict(conversation.verdict); setAttachments([]); setFollowUps(savedFollowUps); setActivePersona(lastFollowUp?.persona || null); setSelectedId(conversation.id); setError("");
+    const lastUserFollowUp = savedFollowUps.slice().reverse().find((message) => message.role === "user");
+    setQuestion(conversation.question); setAnswers(conversation.answers); setVerdict(conversation.verdict); setAttachments([]); setFollowUps(savedFollowUps); setActivePersona(lastUserFollowUp?.persona || null); setSelectedId(conversation.id); setError("");
   }
 
   async function addAttachments(files: FileList | null) {
@@ -271,8 +286,45 @@ export function ChatApp() {
           attachments,
         });
         const assistantMessage: FollowUpMessage = { id: crypto.randomUUID(), persona: targetPersona, role: "assistant", content };
-        saveFollowUps([...pendingFollowUps, assistantMessage]);
+        const answeredFollowUps = [...pendingFollowUps, assistantMessage];
+        saveFollowUps(answeredFollowUps);
         setAttachments([]);
+
+        const interjectionOrder = targetPersona === "bestie"
+          ? ["delulu", "therapist"] as PersonaId[]
+          : targetPersona === "delulu"
+            ? ["bestie", "therapist"] as PersonaId[]
+            : ["bestie", "delulu"] as PersonaId[];
+
+        try {
+          for (const persona of interjectionOrder) {
+            setLoadingStage(persona);
+            const interjection = await requestInterjection({
+              type: "interjection",
+              persona,
+              replyToPersona: targetPersona,
+              message,
+              originalQuestion: question,
+              originalAnswers: answers,
+              verdict,
+              thread: answeredFollowUps,
+            });
+            if (interjection) {
+              const interjectionMessage: FollowUpMessage = {
+                id: crypto.randomUUID(),
+                persona,
+                role: "assistant",
+                content: interjection,
+                replyToMessageId: assistantMessage.id,
+                replyToPersona: targetPersona,
+              };
+              saveFollowUps([...answeredFollowUps, interjectionMessage]);
+              break;
+            }
+          }
+        } catch (interjectionError) {
+          console.error("Persona interjection error:", interjectionError);
+        }
       } catch (requestError) {
         setFollowUps(followUps);
         setInput(message);
@@ -324,7 +376,7 @@ export function ChatApp() {
         <div className="relative min-h-0 flex-1">
           <div className="scrollbar-thin h-full overflow-y-auto px-4 pb-36 pt-6 sm:px-8">
             <div className="mx-auto max-w-3xl">
-              {!question ? <div className="flex min-h-[calc(100dvh-15rem)] flex-col items-center justify-center py-8 text-center"><div className="mb-2 text-3xl" aria-hidden="true">🎀</div><div className="mb-5 flex -space-x-2">{PERSONA_ORDER.map((id) => <span key={id} className={`grid h-12 w-12 place-items-center rounded-full border-4 border-cream shadow-md dark:border-[#21141b] ${PERSONAS[id].avatarClass}`}>{PERSONAS[id].emoji}</span>)}</div><h1 className="text-3xl font-black tracking-[-0.04em] sm:text-4xl">Okay, tell us everything.</h1><p className="mt-3 max-w-md leading-7 text-black/50 dark:text-white/50">Dating confusion, friendship drama, life decisions, study spirals. The group is listening.</p><div className="mt-8 grid w-full max-w-2xl gap-2 sm:grid-cols-2">{STARTER_PROMPTS.slice(0, 4).map((prompt) => <button key={prompt} type="button" onClick={() => { setInput(prompt); textareaRef.current?.focus(); }} className="rounded-2xl border border-black/10 bg-white/60 p-4 text-left text-sm font-semibold leading-5 transition hover:-translate-y-0.5 hover:border-grape/30 hover:bg-white dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10">{prompt}</button>)}</div></div> : <div className="space-y-6 pb-4"><div className="flex justify-end"><div className="max-w-[88%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-ink px-4 py-3.5 text-[15px] leading-6 text-white shadow-bubble dark:bg-white dark:text-ink sm:max-w-[76%]">{question}</div></div>{answers.map((answer) => <PersonaBubble key={answer.persona} answer={answer} onFollowUp={startFollowUp} showFollowUp={Boolean(verdict) && !isLoading} />)}{loadingStage && loadingStage !== "verdict" && !activePersona && <LoadingBubble personaId={loadingStage} />}{(loadingStage === "verdict" || verdict) && <VerdictCard verdict={verdict} loading={loadingStage === "verdict"} />}{followUps.map((message) => message.role === "user" ? <div key={message.id} className="flex justify-end"><div className="max-w-[88%] rounded-2xl rounded-br-md bg-ink px-4 py-3.5 text-[15px] leading-6 text-white dark:bg-white dark:text-ink sm:max-w-[76%]"><p className="mb-1 text-[10px] font-black uppercase tracking-wider opacity-55">To {PERSONAS[message.persona].name}</p><p className="whitespace-pre-wrap">{message.content}</p></div></div> : <PersonaBubble key={message.id} answer={{ persona: message.persona, content: message.content }} onFollowUp={startFollowUp} showFollowUp={!isLoading} />)}{loadingStage && activePersona && <LoadingBubble personaId={activePersona} />}{error && <div className="rounded-2xl border border-red-300 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">{error}</div>}</div>}
+              {!question ? <div className="flex min-h-[calc(100dvh-15rem)] flex-col items-center justify-center py-8 text-center"><div className="mb-2 text-3xl" aria-hidden="true">🎀</div><div className="mb-5 flex -space-x-2">{PERSONA_ORDER.map((id) => <span key={id} className={`grid h-12 w-12 place-items-center rounded-full border-4 border-cream shadow-md dark:border-[#21141b] ${PERSONAS[id].avatarClass}`}>{PERSONAS[id].emoji}</span>)}</div><h1 className="text-3xl font-black tracking-[-0.04em] sm:text-4xl">Okay, tell us everything.</h1><p className="mt-3 max-w-md leading-7 text-black/50 dark:text-white/50">Dating confusion, friendship drama, life decisions, study spirals. The group is listening.</p><div className="mt-8 grid w-full max-w-2xl gap-2 sm:grid-cols-2">{STARTER_PROMPTS.slice(0, 4).map((prompt) => <button key={prompt} type="button" onClick={() => { setInput(prompt); textareaRef.current?.focus(); }} className="rounded-2xl border border-black/10 bg-white/60 p-4 text-left text-sm font-semibold leading-5 transition hover:-translate-y-0.5 hover:border-grape/30 hover:bg-white dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10">{prompt}</button>)}</div></div> : <div className="space-y-6 pb-4"><div className="flex justify-end"><div className="max-w-[88%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-ink px-4 py-3.5 text-[15px] leading-6 text-white shadow-bubble dark:bg-white dark:text-ink sm:max-w-[76%]">{question}</div></div>{answers.map((answer) => <PersonaBubble key={answer.persona} answer={answer} onFollowUp={startFollowUp} showFollowUp={Boolean(verdict) && !isLoading} />)}{loadingStage && loadingStage !== "verdict" && !activePersona && <LoadingBubble personaId={loadingStage} />}{(loadingStage === "verdict" || verdict) && <VerdictCard verdict={verdict} loading={loadingStage === "verdict"} />}{followUps.map((message) => message.role === "user" ? <div key={message.id} className="flex justify-end"><div className="max-w-[88%] rounded-2xl rounded-br-md bg-ink px-4 py-3.5 text-[15px] leading-6 text-white dark:bg-white dark:text-ink sm:max-w-[76%]"><p className="mb-1 text-[10px] font-black uppercase tracking-wider opacity-55">To {PERSONAS[message.persona].name}</p><p className="whitespace-pre-wrap">{message.content}</p></div></div> : <PersonaBubble key={message.id} answer={{ persona: message.persona, content: message.content }} replyToPersona={message.replyToPersona} onFollowUp={startFollowUp} showFollowUp={!isLoading} />)}{loadingStage && activePersona && loadingStage !== "verdict" && <LoadingBubble personaId={loadingStage} />}{error && <div className="rounded-2xl border border-red-300 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">{error}</div>}</div>}
               <div ref={messagesEndRef} />
             </div>
           </div>
