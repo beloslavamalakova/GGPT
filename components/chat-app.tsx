@@ -128,7 +128,7 @@ function WelcomeModal({ onClose }: { onClose: () => void }) {
               const persona = PERSONAS[id];
               const descriptions = {
                 bestie: "Blunt honesty. She tells you what you need to hear, not what you want to hear.",
-                therapist: "Balanced, emotionally mature guidance grounded in patterns and healthy decisions.",
+                therapist: "The grounded friend who notices the bigger picture and somehow says the sane thing.",
                 delulu: "Validates your hopes and helps you explore the optimistic side without ignoring reality.",
               };
               return <div key={id} className="rounded-2xl border border-grape/15 bg-white/70 p-4 dark:border-white/10 dark:bg-white/5"><span className={`grid h-9 w-9 place-items-center rounded-full ${persona.avatarClass}`}>{persona.emoji}</span><p className="mt-3 text-sm font-black">{persona.name}</p><p className="mt-1 text-xs leading-5 text-black/50 dark:text-white/50">{descriptions[id]}</p></div>;
@@ -270,7 +270,7 @@ export function ChatApp() {
     if (question) {
       const targetPersona = activePersona || followUps.at(-1)?.persona;
       if (!targetPersona) {
-        setError("Choose Bestie, Therapist, or Delulu Bestie before sending a follow-up.");
+        setError(`Choose ${PERSONA_ORDER.map((id) => PERSONAS[id].name).join(", ")} before sending a follow-up.`);
         return;
       }
 
@@ -383,7 +383,7 @@ export function ChatApp() {
 
       <section className="flex min-w-0 flex-1 flex-col">
         <header className="z-20 flex h-16 shrink-0 items-center justify-between border-b border-grape/10 bg-cream/85 px-4 backdrop-blur-xl dark:border-white/5 dark:bg-[#21141b]/85 sm:px-6">
-          <div className="flex items-center gap-3"><button type="button" onClick={() => setHistoryOpen(true)} className="grid h-10 w-10 place-items-center rounded-full border border-grape/15 bg-white/70 lg:hidden dark:border-white/10 dark:bg-white/5" aria-label="Open history"><HistoryIcon /></button><div><p className="text-sm font-black">The bestie group 🎀</p><div className="flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-grape" /><p className="text-[11px] text-black/40 dark:text-white/40">Bestie, Therapist & Delulu</p></div></div></div>
+          <div className="flex min-w-0 items-center gap-3"><button type="button" onClick={() => setHistoryOpen(true)} className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-grape/15 bg-white/70 lg:hidden dark:border-white/10 dark:bg-white/5" aria-label="Open history"><HistoryIcon /></button><div className="min-w-0"><p className="text-sm font-black">The bestie group 🎀</p><div className="flex items-center gap-1.5"><span className="h-1.5 w-1.5 shrink-0 rounded-full bg-grape" /><p className="truncate text-[11px] text-black/40 dark:text-white/40">Bestie, The One With Her Life Together & Delulu</p></div></div></div>
           <div className="flex items-center gap-2"><button type="button" onClick={() => setWelcomeOpen(true)} className="grid h-10 w-10 place-items-center rounded-full border border-grape/15 bg-white/70 text-sm font-black text-grape transition hover:bg-white" aria-label="About GossipGPT">?</button><button type="button" onClick={newChat} disabled={isLoading} className="hidden items-center gap-2 rounded-full border border-black/10 bg-white/60 px-4 py-2 text-sm font-bold disabled:opacity-40 dark:border-white/10 dark:bg-white/5 sm:flex"><PlusIcon className="h-4 w-4" /> New</button><ThemeToggle /></div>
         </header>
 

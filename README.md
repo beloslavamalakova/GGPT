@@ -1,6 +1,6 @@
 # GossipGPT
 
-GossipGPT is a mobile-first AI friend-group chat. A user asks one question and gets four sequential Gemini responses: Bestie, Therapist, Delulu Bestie, and a final GGPT Verdict that synthesizes all three perspectives.
+GossipGPT is a mobile-first AI friend-group chat. A user asks one question and gets four sequential Gemini responses: Bestie, The One With Her Life Together, Delulu Bestie, and a final GGPT Verdict that synthesizes all three perspectives.
 
 ## MVP architecture
 
@@ -9,7 +9,7 @@ GossipGPT is a mobile-first AI friend-group chat. A user asks one question and g
 - **Gemini REST API** through a server-only route at `POST /api/respond`.
 - **Browser localStorage** for up to 30 completed conversations and the selected theme.
 - **Sequential client orchestration** so each persona appears as soon as its request completes, followed by the verdict request.
-- **Shared follow-up memory** that lets the user switch between Bestie, Therapist, and Delulu Bestie while every adviser can see the full labeled conversation and interject when they substantively disagree.
+- **Shared follow-up memory** that lets the user switch between Bestie, The One With Her Life Together, and Delulu Bestie while every adviser can see the full labeled conversation and interject when they substantively disagree.
 - **Multimodal context** from screenshots, images, PDFs, text, or Markdown files sent inline to Gemini.
 
 The API key never reaches the browser. Conversation history stays in the current browser, but submitted questions and generated persona answers are sent to Google Gemini to produce responses.
@@ -82,7 +82,7 @@ lib/
 The chat calls the same backend route four times:
 
 1. `Bestie` with the user's question.
-2. `Therapist` with the user's question.
+2. `The One With Her Life Together` with the user's question.
 3. `Delulu Bestie` with the user's question.
 4. `GGPT Verdict` with the question and all three generated answers.
 
