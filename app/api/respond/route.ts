@@ -57,11 +57,13 @@ function isFollowUpMessage(value: unknown): value is FollowUpMessage {
   );
 }
 
-function parseRequest(value: unknown): RespondRequest | null {
-  if (!value || typeof value !== "object") return null;
+type ParsedRequest = { body: RespondRequest } | { error: string };
+
+function parseRequest(value: unknown): ParsedRequest {
+  if (!value || typeof value !== "object") return { error: "Request body must be an object." };
   const body = value as Partial<RespondRequest>;
   if (typeof body.message !== "string" || !body.message.trim() || body.message.length > 4000) {
-    return null;
+    return { error: "Message must contain between 1 and 4000 characters." };
   }
 
   if (
@@ -71,7 +73,8 @@ function parseRequest(value: unknown): RespondRequest | null {
     typeof body.originalQuestion === "string" &&
     body.originalQuestion.trim().length > 0 &&
     Array.isArray(body.originalAnswers) &&
-    body.originalAnswers.length === 3 &&
+    body.originalAnswers.length >= 1 &&
+    body.originalAnswers.length <= 3 &&
     body.originalAnswers.every(isPersonaAnswer) &&
     typeof body.verdict === "string" &&
     body.verdict.trim().length > 0 &&
@@ -81,16 +84,18 @@ function parseRequest(value: unknown): RespondRequest | null {
     body.thread.reduce((total, message) => total + message.content.length, 0) <= 60000
   ) {
     const attachments = parseAttachments(body.attachments);
-    if (!attachments) return null;
+    if (!attachments) return { error: "Attachments are invalid or exceed the allowed limits." };
     return {
-      type: "followup",
-      persona: body.persona as PersonaId,
-      message: body.message.trim(),
-      originalQuestion: body.originalQuestion.trim(),
-      originalAnswers: body.originalAnswers,
-      verdict: body.verdict.trim(),
-      thread: body.thread,
-      attachments,
+      body: {
+        type: "followup",
+        persona: body.persona as PersonaId,
+        message: body.message.trim(),
+        originalQuestion: body.originalQuestion.trim(),
+        originalAnswers: body.originalAnswers,
+        verdict: body.verdict.trim(),
+        thread: body.thread,
+        attachments,
+      },
     };
   }
 
@@ -104,7 +109,8 @@ function parseRequest(value: unknown): RespondRequest | null {
     typeof body.originalQuestion === "string" &&
     body.originalQuestion.trim().length > 0 &&
     Array.isArray(body.originalAnswers) &&
-    body.originalAnswers.length === 3 &&
+    body.originalAnswers.length >= 1 &&
+    body.originalAnswers.length <= 3 &&
     body.originalAnswers.every(isPersonaAnswer) &&
     typeof body.verdict === "string" &&
     body.verdict.trim().length > 0 &&
@@ -115,14 +121,16 @@ function parseRequest(value: unknown): RespondRequest | null {
     body.thread.reduce((total, message) => total + message.content.length, 0) <= 60000
   ) {
     return {
-      type: "interjection",
-      persona: body.persona as PersonaId,
-      replyToPersona: body.replyToPersona as PersonaId,
-      message: body.message.trim(),
-      originalQuestion: body.originalQuestion.trim(),
-      originalAnswers: body.originalAnswers,
-      verdict: body.verdict.trim(),
-      thread: body.thread,
+      body: {
+        type: "interjection",
+        persona: body.persona as PersonaId,
+        replyToPersona: body.replyToPersona as PersonaId,
+        message: body.message.trim(),
+        originalQuestion: body.originalQuestion.trim(),
+        originalAnswers: body.originalAnswers,
+        verdict: body.verdict.trim(),
+        thread: body.thread,
+      },
     };
   }
 
@@ -132,8 +140,8 @@ function parseRequest(value: unknown): RespondRequest | null {
     PERSONA_IDS.has(body.persona as PersonaId)
   ) {
     const attachments = parseAttachments(body.attachments);
-    if (!attachments) return null;
-    return { type: "persona", persona: body.persona as PersonaId, message: body.message.trim(), attachments };
+    if (!attachments) return { error: "Attachments are invalid or exceed the allowed limits." };
+    return { body: { type: "persona", persona: body.persona as PersonaId, message: body.message.trim(), attachments } };
   }
 
   if (
@@ -142,18 +150,19 @@ function parseRequest(value: unknown): RespondRequest | null {
     body.answers.length === 3 &&
     body.answers.every(isPersonaAnswer)
   ) {
-    return { type: "verdict", message: body.message.trim(), answers: body.answers };
+    return { body: { type: "verdict", message: body.message.trim(), answers: body.answers } };
   }
 
-  return null;
+  return { error: `Invalid ${typeof body.type === "string" ? body.type : "unknown"} request context.` };
 }
 
 export async function POST(request: Request) {
   try {
-    const body = parseRequest(await request.json());
-    if (!body) {
-      return NextResponse.json({ error: "Invalid request." }, { status: 400 });
+    const parsed = parseRequest(await request.json());
+    if ("error" in parsed) {
+      return NextResponse.json({ error: parsed.error }, { status: 400 });
     }
+    const body = parsed.body;
 
     const hasPriorReplyFromSelectedPersona = body.type === "followup" && body.thread.some(
       (message) => message.role === "assistant" && message.persona === body.persona,

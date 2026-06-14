@@ -18,6 +18,20 @@ function displayText(content: string) {
   return content.replace(/\*\*/g, "");
 }
 
+function recentThreadContext(messages: FollowUpMessage[]) {
+  const context: FollowUpMessage[] = [];
+  let totalCharacters = 0;
+
+  for (let index = messages.length - 1; index >= 0 && context.length < 60; index -= 1) {
+    const message = messages[index];
+    if (totalCharacters + message.content.length > 50000) break;
+    context.unshift(message);
+    totalCharacters += message.content.length;
+  }
+
+  return context;
+}
+
 function readFileAsAttachment(file: File): Promise<Attachment> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -282,7 +296,7 @@ export function ChatApp() {
           originalQuestion: question,
           originalAnswers: answers,
           verdict,
-          thread: followUps,
+          thread: recentThreadContext(followUps),
           attachments,
         });
         const assistantMessage: FollowUpMessage = { id: crypto.randomUUID(), persona: targetPersona, role: "assistant", content };
@@ -307,7 +321,7 @@ export function ChatApp() {
               originalQuestion: question,
               originalAnswers: answers,
               verdict,
-              thread: answeredFollowUps,
+              thread: recentThreadContext(answeredFollowUps),
             });
             if (interjection) {
               const interjectionMessage: FollowUpMessage = {
