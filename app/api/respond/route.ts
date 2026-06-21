@@ -1,16 +1,112 @@
 import { NextResponse } from "next/server";
 import { generateGeminiText } from "@/lib/gemini";
-import { PERSONAS, VERDICT_PROMPT } from "@/lib/personas";
-import type { Attachment, FollowUpMessage, PersonaAnswer, PersonaId, RespondRequest } from "@/lib/types";
+import { buildPrompt } from "@/lib/prompt-builders";
+import { PERSONAS } from "@/lib/personas";
+import type { Attachment, ChainBubble, FollowUpMessage, PersonaAnswer, PersonaId, RespondRequest } from "@/lib/types";
 
 export const runtime = "nodejs";
 
-const PERSONA_IDS = new Set<PersonaId>(["bestie", "therapist", "delulu"]);
+const PERSONA_IDS = new Set<PersonaId>(["bestie", "life", "delulu", "therapist"]);
+const GROUP_PERSONA_IDS = new Set<PersonaId>(["bestie", "life", "delulu"]);
 const ALLOWED_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf", "text/plain", "text/markdown"]);
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+const MESSAGE_TYPES = new Set(["micro", "short", "medium", "long"]);
 
 function sanitizeGeneratedText(content: string) {
   return content.replace(/\*\*/g, "").trim();
+}
+
+function extractJsonObject(content: string) {
+  const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(content);
+  const source = fenced?.[1] || content;
+  const start = source.indexOf("{");
+  const end = source.lastIndexOf("}");
+  if (start === -1 || end === -1 || end <= start) return null;
+  return source.slice(start, end + 1);
+}
+
+function parseChainBubbles(content: string): ChainBubble[] | null {
+  const json = extractJsonObject(content);
+  if (!json) return null;
+
+  try {
+    const parsed = JSON.parse(json) as { bubbles?: unknown };
+    if (!Array.isArray(parsed.bubbles)) return null;
+
+    const bubbles = parsed.bubbles.slice(0, 5).flatMap((bubble): ChainBubble[] => {
+      if (!bubble || typeof bubble !== "object") return [];
+      const value = bubble as Partial<ChainBubble>;
+      if (
+        typeof value.personaId !== "string" ||
+        !PERSONA_IDS.has(value.personaId as PersonaId) ||
+        typeof value.body !== "string" ||
+        !value.body.trim() ||
+        typeof value.messageType !== "string" ||
+        !MESSAGE_TYPES.has(value.messageType) ||
+        (value.replyToPersonaId !== undefined && value.replyToPersonaId !== null && !PERSONA_IDS.has(value.replyToPersonaId as PersonaId))
+      ) {
+        return [];
+      }
+
+      return [{
+        personaId: value.personaId as PersonaId,
+        body: sanitizeGeneratedText(value.body).slice(0, 2400),
+        replyToPersonaId: value.replyToPersonaId ? value.replyToPersonaId as PersonaId : null,
+        messageType: value.messageType as ChainBubble["messageType"],
+      }];
+    });
+
+    return bubbles.length > 0 ? bubbles : null;
+  } catch {
+    return null;
+  }
+}
+
+function filterChainBubblesForMode(bubbles: ChainBubble[], recipients: PersonaId[]) {
+  if (recipients.includes("therapist")) {
+    const therapistBubble = bubbles.find((bubble) => bubble.personaId === "therapist");
+    return therapistBubble ? [{ ...therapistBubble, replyToPersonaId: null, messageType: "long" as const }] : [];
+  }
+
+  return bubbles.filter((bubble) => GROUP_PERSONA_IDS.has(bubble.personaId));
+}
+
+function isQuestionableAdvice(text: string) {
+  return /\b(test|trap|bait|fake secret|fake post|make (him|her|them) jealous|jealous|provoke|reaction|revenge|stalk|check obsessively|play games|ignore (his|her|their) boundaries|silent treatment|punish)\b/i.test(text);
+}
+
+function isGroundingResponse(bubble: ChainBubble) {
+  return (
+    (bubble.personaId === "life" || bubble.personaId === "bestie") &&
+    /\b(no|not|don't|do not|pause|trap|trust|boundary|boundaries|manipulat|rebuild|repair|problem|sting operation|we are not)\b/i.test(bubble.body)
+  );
+}
+
+function groundingBubbleFor(unsafeBubble: ChainBubble): ChainBubble {
+  const fakeSecretPattern = /\b(fake secret|fake post|test|trap|bait)\b/i;
+  return {
+    personaId: "life",
+    body: fakeSecretPattern.test(unsafeBubble.body)
+      ? "Okay, pause. Testing her with a fake secret will not actually rebuild trust. It creates a trap, and what you need is a real repair conversation about what changes next."
+      : "Okay, pause. That might feel satisfying for five seconds, but it creates a new problem. The move is directness, boundaries, and self-respect, not setting up a reaction.",
+    replyToPersonaId: unsafeBubble.personaId,
+    messageType: "short",
+  };
+}
+
+function enforceChainSafety(bubbles: ChainBubble[]) {
+  const unsafeIndex = bubbles.findLastIndex((bubble) => isQuestionableAdvice(bubble.body));
+  if (unsafeIndex === -1) return bubbles;
+
+  const hasLaterGrounding = bubbles.slice(unsafeIndex + 1).some(isGroundingResponse);
+  const unsafeBubble = bubbles[unsafeIndex];
+  const lastBubble = bubbles[bubbles.length - 1];
+  if (hasLaterGrounding && !(unsafeBubble.personaId === "delulu" && lastBubble.personaId === "delulu")) return bubbles;
+
+  const grounding = groundingBubbleFor(unsafeBubble);
+  if (bubbles.length < 5) return [...bubbles, grounding];
+
+  return [...bubbles.slice(0, 4), grounding];
 }
 
 function isAttachment(value: unknown): value is Attachment {
@@ -42,6 +138,14 @@ function isPersonaAnswer(value: unknown): value is PersonaAnswer {
   );
 }
 
+function parsePersonaIds(value: unknown): PersonaId[] | null {
+  if (!Array.isArray(value) || value.length > 3) return null;
+  const personas = value.filter((persona): persona is PersonaId =>
+    typeof persona === "string" && PERSONA_IDS.has(persona as PersonaId),
+  );
+  return personas.length === value.length ? personas : null;
+}
+
 function isFollowUpMessage(value: unknown): value is FollowUpMessage {
   if (!value || typeof value !== "object") return false;
   const message = value as Partial<FollowUpMessage>;
@@ -52,6 +156,8 @@ function isFollowUpMessage(value: unknown): value is FollowUpMessage {
     (message.role === "user" || message.role === "assistant") &&
     typeof message.content === "string" &&
     message.content.trim().length > 0 &&
+    (message.taggedPersonas === undefined ||
+      (Array.isArray(message.taggedPersonas) && message.taggedPersonas.every((persona) => PERSONA_IDS.has(persona)))) &&
     (message.replyToMessageId === undefined || typeof message.replyToMessageId === "string") &&
     (message.replyToPersona === undefined || PERSONA_IDS.has(message.replyToPersona as PersonaId))
   );
@@ -67,6 +173,44 @@ function parseRequest(value: unknown): ParsedRequest {
   }
 
   if (
+    body.type === "chain" &&
+    typeof body.originalQuestion === "string" &&
+    body.originalQuestion.trim().length > 0 &&
+    Array.isArray(body.originalAnswers) &&
+    body.originalAnswers.length <= 5 &&
+    body.originalAnswers.every(isPersonaAnswer) &&
+    typeof body.tldr === "string" &&
+    body.tldr.trim().length > 0 &&
+    Array.isArray(body.thread) &&
+    body.thread.length <= 80 &&
+    body.thread.every(isFollowUpMessage) &&
+    body.thread.reduce((total, message) => total + message.content.length, 0) <= 60000 &&
+    (body.responseMode === "auto" || body.responseMode === "direct_tagged") &&
+    typeof body.asInitial === "boolean" &&
+    typeof body.allowUntaggedJumpIns === "boolean"
+  ) {
+    const recipients = parsePersonaIds(body.recipients);
+    if (!recipients) return { error: "Chain recipients are invalid." };
+    const attachments = parseAttachments(body.attachments);
+    if (!attachments) return { error: "Attachments are invalid or exceed the allowed limits." };
+    return {
+      body: {
+        type: "chain",
+        message: body.message.trim(),
+        recipients,
+        responseMode: body.responseMode,
+        originalQuestion: body.originalQuestion.trim(),
+        originalAnswers: body.originalAnswers,
+        tldr: body.tldr.trim(),
+        thread: body.thread,
+        asInitial: body.asInitial,
+        allowUntaggedJumpIns: body.allowUntaggedJumpIns,
+        attachments,
+      },
+    };
+  }
+
+  if (
     body.type === "followup" &&
     typeof body.persona === "string" &&
     PERSONA_IDS.has(body.persona as PersonaId) &&
@@ -76,8 +220,8 @@ function parseRequest(value: unknown): ParsedRequest {
     body.originalAnswers.length >= 1 &&
     body.originalAnswers.length <= 3 &&
     body.originalAnswers.every(isPersonaAnswer) &&
-    typeof body.verdict === "string" &&
-    body.verdict.trim().length > 0 &&
+    typeof body.tldr === "string" &&
+    body.tldr.trim().length > 0 &&
     Array.isArray(body.thread) &&
     body.thread.length <= 80 &&
     body.thread.every(isFollowUpMessage) &&
@@ -92,7 +236,7 @@ function parseRequest(value: unknown): ParsedRequest {
         message: body.message.trim(),
         originalQuestion: body.originalQuestion.trim(),
         originalAnswers: body.originalAnswers,
-        verdict: body.verdict.trim(),
+        tldr: body.tldr.trim(),
         thread: body.thread,
         attachments,
       },
@@ -112,10 +256,9 @@ function parseRequest(value: unknown): ParsedRequest {
     body.originalAnswers.length >= 1 &&
     body.originalAnswers.length <= 3 &&
     body.originalAnswers.every(isPersonaAnswer) &&
-    typeof body.verdict === "string" &&
-    body.verdict.trim().length > 0 &&
+    typeof body.tldr === "string" &&
+    body.tldr.trim().length > 0 &&
     Array.isArray(body.thread) &&
-    body.thread.length > 0 &&
     body.thread.length <= 80 &&
     body.thread.every(isFollowUpMessage) &&
     body.thread.reduce((total, message) => total + message.content.length, 0) <= 60000
@@ -128,7 +271,7 @@ function parseRequest(value: unknown): ParsedRequest {
         message: body.message.trim(),
         originalQuestion: body.originalQuestion.trim(),
         originalAnswers: body.originalAnswers,
-        verdict: body.verdict.trim(),
+        tldr: body.tldr.trim(),
         thread: body.thread,
       },
     };
@@ -145,12 +288,20 @@ function parseRequest(value: unknown): ParsedRequest {
   }
 
   if (
-    body.type === "verdict" &&
+    body.type === "tldr" &&
     Array.isArray(body.answers) &&
-    body.answers.length === 3 &&
+    body.answers.length >= 1 &&
+    body.answers.length <= 5 &&
     body.answers.every(isPersonaAnswer)
   ) {
-    return { body: { type: "verdict", message: body.message.trim(), answers: body.answers } };
+    return {
+      body: {
+        type: "tldr",
+        message: body.message.trim(),
+        answers: body.answers,
+        thread: Array.isArray(body.thread) && body.thread.every(isFollowUpMessage) ? body.thread.slice(0, 80) : [],
+      },
+    };
   }
 
   return { error: `Invalid ${typeof body.type === "string" ? body.type : "unknown"} request context.` };
@@ -164,101 +315,25 @@ export async function POST(request: Request) {
     }
     const body = parsed.body;
 
-    const hasPriorReplyFromSelectedPersona = body.type === "followup" && body.thread.some(
-      (message) => message.role === "assistant" && message.persona === body.persona,
-    );
-    const interjectionClashFocus = body.type === "interjection"
-      ? body.persona === "bestie" && body.replyToPersona === "delulu"
-        ? `As Bestie evaluating Delulu Bestie, intervene only if Delulu's hopeful interpretation leads to a materially different conclusion or next action than your honest reading. Do not reply just to soften, qualify, endorse, or add practical advice to her optimism.`
-        : body.persona === "delulu" && body.replyToPersona === "bestie"
-          ? `As Delulu Bestie evaluating Bestie, silently intervene only if Bestie's conclusion closes off a hopeful reading you genuinely want to keep open, or her suggested action conflicts with yours. Do not reply just to reassure the user after agreeing with Bestie's conclusion.`
-          : `Intervene only when your conclusion or recommended action is materially incompatible with ${PERSONAS[body.replyToPersona].name}'s.`
-      : "";
-    const interjectionVoice = body.type === "interjection" && body.persona === "delulu"
-      ? `Begin with "${PERSONAS[body.replyToPersona].name}," and disagree like a friend discovering her thought while texting from bed, not a lawyer presenting a conclusion. Think out loud with "my first thought is," "my delulu brain immediately goes," "I'm not saying that's true," or a quick "what if" when natural. Paint one tiny alternative scene without claiming to know anyone's emotions, motives, fears, regrets, or intentions. Never use "you are ignoring," "you are dismissing," "valid," "acknowledging," "evidence," "reasonable," or abstract argument language. Good energy: "${PERSONAS[body.replyToPersona].name}, wait, what if he just panicked?", "${PERSONAS[body.replyToPersona].name}, I'm not saying that's true, but that assumes he had a master plan," or "${PERSONAS[body.replyToPersona].name}, girl, not everything is a strategic operation." Keep it playful, curious, uncertain, and spontaneous rather than persuasive.`
-      : `Begin with the exact name "${body.type === "interjection" ? PERSONAS[body.replyToPersona].name : "the other persona"}," so it is unmistakably a direct reply. State the disagreement immediately.`;
-    const stageInstructions = body.type === "persona"
-      ? `\n\nINITIAL GROUP REPLY RULE: Give a complete first perspective based only on what the user shared. Do not ask the user any questions in this initial reply. Do not end with a question mark.`
-      : body.type === "followup"
-        ? hasPriorReplyFromSelectedPersona
-          ? `\n\nONGOING CONVERSATION RULE: Respond to what the user just said, then ask at most one short, natural follow-up question only if the answer would meaningfully improve your guidance. Never ask multiple questions or make the user feel interrogated.`
-          : `\n\nFIRST SELECTED-BESTIE REPLY RULE: After responding with empathy and a useful initial thought, end with exactly one short, specific, easy-to-answer follow-up question. Ask about the single missing detail that would help you understand the situation best. Do not ask multiple questions.`
-        : body.type === "interjection"
-          ? `\n\nDIRECT PERSONA REPLY RULE - STRICT DISAGREEMENT GATE:
-These rules override the normal reply length, acknowledgment, reassurance, next-step, and user-directed opening rules above.
-Your task is not to continue the conversation. Your task is only to detect a real clash with ${PERSONAS[body.replyToPersona].name}'s latest response.
-
-A clash exists only when at least one of these is true:
-1. You believe a central interpretation or prediction in their response is wrong or meaningfully misleading.
-2. You recommend a materially incompatible next action.
-3. Following their advice would undermine what you believe the user should do.
-
-No clash exists when you agree with their conclusion but would use a different tone, add reassurance, add a caveat, suggest another explanation, or offer extra advice. Agreement plus nuance is still agreement. ${interjectionClashFocus}
-
-If there is no clear clash, output exactly NO_REPLY and nothing else. When uncertain, output NO_REPLY.
-If there is a clear clash, ${interjectionVoice} Do not praise, validate, support, echo, build on, or summarize the other persona's response. Do not use agreement openings such as "I agree," "exactly," "yes," "totally," "fair," or "and." Use only one or two short sentences and 15-35 words total. Do not ask a question. Use plain text only, with no Markdown or asterisks.`
-          : "";
-    const instructions = body.type === "verdict"
-      ? VERDICT_PROMPT
-      : `${PERSONAS[body.persona].systemPrompt}${stageInstructions}`;
-    const input =
-      body.type === "persona"
-        ? body.message
-        : body.type === "followup"
-          ? `You are joining an ongoing shared GossipGPT conversation. You can see what the user discussed with every adviser. Stay fully in your own persona, but use the entire shared history when forming your opinion. Never claim another adviser's words as your own. Answer the latest user message directly and do not recap the whole conversation unless asked.
-
-ORIGINAL QUESTION:
-${body.originalQuestion}
-
-ORIGINAL ADVISER ANSWERS:
-${body.originalAnswers.map((answer) => `${PERSONAS[answer.persona].name.toUpperCase()}: ${answer.content}`).join("\n\n")}
-
-GGPT VERDICT:
-${body.verdict}
-
-SHARED FOLLOW-UP TRANSCRIPT:
-${body.thread.map((message) => message.role === "user"
-  ? `USER TO ${PERSONAS[message.persona].name.toUpperCase()}: ${message.content}`
-  : `${PERSONAS[message.persona].name.toUpperCase()}: ${message.content}`).join("\n\n") || "No earlier follow-ups."}
-
-LATEST USER MESSAGE TO ${PERSONAS[body.persona].name.toUpperCase()}:
-${body.message}`
-          : body.type === "interjection"
-            ? `You are evaluating whether to interrupt a shared GossipGPT group chat. The user directed their latest message to ${PERSONAS[body.replyToPersona].name}, who just answered. Silence is the expected outcome unless the two opinions genuinely clash. Compare conclusions and recommended actions, not personality or tone.
-
-ORIGINAL QUESTION:
-${body.originalQuestion}
-
-ORIGINAL ADVISER ANSWERS:
-${body.originalAnswers.map((answer) => `${PERSONAS[answer.persona].name.toUpperCase()}: ${answer.content}`).join("\n\n")}
-
-GGPT VERDICT:
-${body.verdict}
-
-SHARED FOLLOW-UP TRANSCRIPT:
-${body.thread.map((message) => message.role === "user"
-  ? `USER TO ${PERSONAS[message.persona].name.toUpperCase()}: ${message.content}`
-  : message.replyToPersona
-    ? `${PERSONAS[message.persona].name.toUpperCase()} REPLYING TO ${PERSONAS[message.replyToPersona].name.toUpperCase()}: ${message.content}`
-    : `${PERSONAS[message.persona].name.toUpperCase()}: ${message.content}`).join("\n\n")}
-
-LATEST USER MESSAGE:
-${body.message}
-
-Before answering, silently complete this test: "Their response says the user should believe/do X; I instead believe the user should believe/do incompatible Y." If you cannot fill in both X and Y clearly, output NO_REPLY.`
-          : `USER'S QUESTION:\n${body.message}\n\nADVISERS:\n${body.answers
-            .map((answer) => `${PERSONAS[answer.persona].name.toUpperCase()}:\n${answer.content}`)
-            .join("\n\n")}`;
+    const prompt = buildPrompt(body);
 
     const content = await generateGeminiText({
-      systemInstruction: instructions,
-      input,
-      maxOutputTokens: body.type === "verdict" ? 280 : body.type === "interjection" ? 90 : 350,
-      temperature: body.type === "verdict" ? 0.45 : body.type === "interjection" ? 0.2 : 0.8,
-      attachments: body.type === "persona" || body.type === "followup" ? body.attachments : [],
+      systemInstruction: prompt.systemInstruction,
+      input: prompt.input,
+      maxOutputTokens: prompt.maxOutputTokens,
+      temperature: prompt.temperature,
+      attachments: body.type === "persona" || body.type === "followup" || body.type === "chain" ? body.attachments : [],
     });
 
     if (!content) throw new Error("The model returned an empty response.");
+
+    if (body.type === "chain") {
+      const bubbles = parseChainBubbles(content);
+      if (!bubbles) throw new Error("The model returned an invalid chain response.");
+      const modeFilteredBubbles = filterChainBubblesForMode(bubbles, body.recipients);
+      if (!modeFilteredBubbles.length) throw new Error("The model returned an invalid chain response.");
+      return NextResponse.json({ bubbles: body.recipients.includes("therapist") ? modeFilteredBubbles : enforceChainSafety(modeFilteredBubbles) });
+    }
 
     let sanitizedContent = sanitizeGeneratedText(content);
     const isNoReply = body.type === "interjection" && /^NO_REPLY[.!]?$/i.test(sanitizedContent);

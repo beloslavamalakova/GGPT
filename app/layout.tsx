@@ -3,7 +3,7 @@ import { ThemeScript } from "@/components/theme-script";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "GossipGPT | Three takes. One verdict.",
+  title: "GossipGPT | Drop the drama into the group chat.",
   description: "Get honest, balanced, and hopeful advice from your AI friend group.",
 };
 

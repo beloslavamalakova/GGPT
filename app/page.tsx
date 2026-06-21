@@ -27,7 +27,7 @@ export default function HomePage() {
             <span aria-hidden="true">🎀</span> Your group chat has thoughts
           </div>
           <h1 className="max-w-3xl text-5xl font-black leading-[0.98] tracking-[-0.06em] text-ink dark:text-white sm:text-6xl md:text-7xl">
-            Three takes.<br /><span className="text-grape dark:text-[#ff9fc4]">One verdict.</span>
+            Drop the drama.<br /><span className="text-grape dark:text-[#ff9fc4]">Let the group chat.</span>
           </h1>
           <p className="mt-6 max-w-xl text-lg leading-8 text-black/60 dark:text-white/60 sm:text-xl">
             Ask the thing you have already overthought. Get honesty, emotional intelligence, and a little useful delusion.
@@ -61,8 +61,8 @@ export default function HomePage() {
               })}
             </div>
             <div className="rounded-2xl border border-white/30 bg-gradient-to-br from-[#eb7caa] to-[#c84f82] p-4 text-white shadow-lg">
-              <p className="text-xs font-black uppercase tracking-[0.18em] text-white/70">GGPT Verdict</p>
-              <p className="mt-2 text-sm font-medium leading-6">Stop reading digital crumbs. Send one clear message, then let his effort answer the question.</p>
+              <p className="text-xs font-black uppercase tracking-[0.18em] text-white/70">TL;DR</p>
+              <p className="mt-2 text-sm font-medium leading-6">Bestie says stop reading crumbs; Delulu says the timing is interesting. Nobody says chase him from a story view.</p>
             </div>
           </div>
         </div>
