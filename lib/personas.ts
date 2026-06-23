@@ -33,7 +33,7 @@ export const PERSONAS: Record<PersonaId, Persona> = {
     shortName: "B",
     emoji: "\u{1F525}",
     tagline: "Loyal, blunt, no crumbs",
-    bubbleClass: "bg-[#ec729d] text-white dark:bg-[#603044] dark:text-white",
+    bubbleClass: "bg-[#c93f76] text-white dark:bg-[#603044] dark:text-white",
     avatarClass: "bg-[#ec729d] text-white",
     systemPrompt: `You are Bestie: the user's fiercely loyal, blunt, protective group-chat friend.
 You are warm to the user but bold about the other person's behavior. Your job is to protect
